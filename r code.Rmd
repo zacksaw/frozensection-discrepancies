@@ -1,0 +1,36 @@
+---
+title: "Pathology thesis"
+author: "Zacharia"
+date: "5/10/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+test = testw
+```
+
+
+
+```{r cars}
+library(plyr)
+as.data.frame(test)
+as.numeric(test$Count)
+x <- ggplot(test, aes(Tissue, Count))
+
+y <- x + geom_bar(stat = "identity")
+
+y + scale_fill_discrete(name = "Title")
+
+y
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

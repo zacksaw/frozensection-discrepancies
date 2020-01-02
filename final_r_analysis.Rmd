@@ -1,0 +1,714 @@
+---
+title: "MS practicum final presentation"
+author: "Zacharia"
+date: "6/10/2019"
+output: html_document
+---
+
+```{r}
+library(tibble)
+library(dplyr)
+library(caret)
+library(pROC)
+library(MASS)
+library(ggplot2)
+library(gridExtra)
+library(devtools)
+library(ggfortify)
+library(glmnet)
+library(tidyr)
+library(naniar)
+library(ggsci)
+
+```
+#Clean up the data
+```{r}
+setwd("~/Documents/Research projects/Path project (MS thesis)")
+
+library(readxl)
+
+Main_Data_pathThesis_processed <- read_excel("Main Data_pathThesis_processed copy.xlsx")
+
+head(Main_Data_pathThesis_processed)
+
+rownames(Main_Data_pathThesis_processed)  <- Main_Data_pathThesis_processed$`Pathology Case`
+
+misdiagnosis_predictor <- (Main_Data_pathThesis_processed)
+
+#misdiagnosis_predictor$Pathology Case <- NULL 
+
+dim(misdiagnosis_predictor)
+
+str(misdiagnosis_predictor)
+```
+
+#rename columns
+```{r}
+colnames(misdiagnosis_predictor)[22] <- "other_tissue"
+
+colnames(misdiagnosis_predictor)[23] <- "same_tissue_diagnosis"
+
+colnames(misdiagnosis_predictor)[24] <- "same_diagnosis"
+
+colnames(misdiagnosis_predictor)
+```
+#remove variables with a lot of missing data and little variablity
+```{r}
+
+path_data <- transform(misdiagnosis_predictor,
+                     robotic = as.factor(robotic),
+                     other_tissue = as.factor(other_tissue),
+                    same_diagnosis = as.factor(same_diagnosis),
+                    same_tissue_diagnosis = as.factor(same_tissue_diagnosis),
+                    tissue_type = as.factor(tissue_type),
+                    FS_Speciality = as.factor(FS_Speciality),
+                    FS_Pathologist = as.factor(FS_Pathologist),
+                    Surgeon = as.factor(Surgeon),
+                    Final_pathologist = as.factor(Final_pathologist),
+                    Final_speciality = as.factor(Final_speciality),
+                    FS_diagnosis = as.factor(FS_diagnosis),
+                    Final_diagnosis = as.factor(Final_diagnosis),
+                    Origin_tissue = as.factor(Origin_tissue))
+
+#There are many missing variables in the weight column, and the operations are too complex to use in the algorithm.
+
+path_data$Weight <- NULL
+path_data$operation <- NULL
+
+#name misdiagnosis levels
+levels(path_data$same_diagnosis)[1] <- "Misdiagnosed"
+levels(path_data$same_diagnosis)[2] <- "Correct diagnosis"
+
+levels(path_data$robotic)[1] <- "Traditional_Laproscopic"
+levels(path_data$robotic)[2] <- "Robotic"
+
+
+str(path_data)
+```
+
+#Divide the data in screening predictor and diagnosis predictor
+
+
+```{r}
+# add a new column
+
+path_data$age_tissue <- (path_data$result_reported - path_data$start_of_operation)
+
+path_data <- path_data[c(1,2,3,4,5,6,23,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22)]
+
+path_data[13,18] <- 42
+path_data$Pathology.Case <- NULL
+
+summary(path_data)
+
+
+# library(Hmisc)
+# decribed <- describe(path_data)
+# 
+# library(summarytools)
+# dfSummary(path_data)
+```
+```{r}
+#output the summary into a DF
+
+do.call(cbind, lapply(path_data, summary))
+
+hmsic_df <- data.frame(unclass(Hmisc::describe(path_data)), check.names = FALSE, stringsAsFactors = FALSE)
+
+sumamry_df <- data.frame(unclass(summary(path_data)), check.names = FALSE, stringsAsFactors = FALSE)
+
+write.csv( sumamry_df,"~/Documents/Research projects/Path project (MS thesis)/sumamry_df.csv", row.names = TRUE)
+
+library("psych")
+psych_df <- psych::describeBy(path_data, path_data$same_diagnosis)
+psych_df_mis <- psych_df$Misdiagnosed
+write.csv(psych_df_mis,"~/Documents/Research projects/Path project (MS thesis)/psych_df_mis.csv", row.names = TRUE)
+psych_df_correct <- psych_df$`Correct diagnosis`
+write.csv(psych_df_correct,"~/Documents/Research projects/Path project (MS thesis)/psych_df_correct.csv", row.names = TRUE)
+
+library(skimr)
+skim(path_data)
+```
+#removing factors
+```{r}
+path_data_numeric <- path_data[,c(2:7,15,16,18,23)]
+summary(path_data_numeric)
+```
+#Finding correlations
+```{r}
+as.data.frame(path_data_numeric)
+
+cor(path_data_numeric[,-10])
+
+```
+```{r}
+
+
+library(reshape2)
+cormat <- round(cor(path_data_numeric[,-10]),2)
+head(cormat)
+melted_cormat <- melt(cormat)
+head(melted_cormat)
+
+ggplot(data = melted_cormat, aes(Var1,Var2, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1))+
+ coord_fixed()
+```
+#Regularization
+```{r}
+require(data.table)
+require(DT)
+
+fit = glmnet(as.matrix(path_data_numeric[,-c(10)]),as.matrix(misdiagnosis_predictor$same_diagnosis), family="gaussian",alpha=1)
+
+plot(fit,label = TRUE)
+
+print(fit)
+
+coef(fit,s=0.1)
+
+cvfit = cv.glmnet(as.matrix(path_data_numeric[,-10]), as.matrix(misdiagnosis_predictor$same_diagnosis))
+
+plot(cvfit)
+
+require(plotly)
+```
+
+```{r}
+
+#getting an aggregate of all varaables by diagnosis type
+
+Aggregated_values_all <- aCRM::Aggregate(x=path_data, by=path_data$same_diagnosis)
+write.csv(Aggregated_values_all,"~/Documents/Research projects/Path project (MS thesis)/Aggregated_values_all.csv")
+
+```
+
+
+
+
+```{r}
+#t-test for all time related factors
+
+ttest_start_time <- t.test(start_of_operation~ same_diagnosis, path_data)
+ttest_date <- t.test(Date_of_operation~ same_diagnosis, path_data)
+ttest_result_reported <- t.test(result_reported ~ same_diagnosis, path_data)
+ttest_age_tissue <- t.test(age_tissue~ same_diagnosis, path_data)
+ttest_age <- t.test(Age~ same_diagnosis, path_data)
+
+ttest_start_time 
+ttest_date
+ttest_result_reported
+ttest_age_tissue 
+ttest_age
+```
+
+
+```{r}
+#assessing robotic hysterectomy's impact on outcome
+robotic_df <- as.data.frame(cbind(Aggregated_values_all$robotic_Traditional_Laproscopic_sum, Aggregated_values_all$robotic_Robotic_sum))
+row.names(robotic_df) <- Aggregated_values_all$ID
+
+colnames(robotic_df)[1] <- "laproscopic"
+colnames(robotic_df)[2] <- "robotic"
+
+chisq.test(robotic_df)
+
+
+h <- ggplot(path_data, aes(robotic,same_diagnosis))+
+  geom_jitter()+ 
+  ylab("F/S diagnosis outcome")
+
+h
+```
+
+```{r}
+review_complexity <- ggplot(path_data, aes(volume, Review_time)) + geom_point(aes(color = same_diagnosis)) + 
+  scale_x_continuous("Volume of tissue (cm3)",limits = c(0, 20))+
+  scale_y_continuous("Time tissue reviewed (min)")+
+  theme_bw() + labs(title="A") +
+  theme(legend.position = "none")
+
+ggsave("~/Documents/Research projects/Path project (MS thesis)/extent_review.jpeg" )
+
+review_complexity
+```
+```{r}
+
+ttest_volume <- t.test(volume~ same_diagnosis, path_data)
+ttest_volume
+path_data$age_tissue <- as.numeric(path_data$age_tissue) 
+
+op_complexity <- ggplot(path_data, aes(operation_complexity, age_tissue)) + geom_point(aes(color = same_diagnosis)) + 
+  scale_x_continuous("Operation Complexity")+
+  scale_y_continuous("Time of Operation (min)")+
+  theme_bw() + labs(title="B") +
+  theme(legend.title = element_blank())
+
+ggsave("~/Documents/Research projects/Path project (MS thesis)/extent_operation.jpeg" )
+
+
+```
+```{r}
+grid.arrange(review_complexity, op_complexity, nrow = 1, layout_matrix = rbind(c(1, 1, 2, 2, 2)))
+
+```
+
+```{r}
+# ggplot(path_data, aes(same_diagnosis, fill = FS_Speciality)) + geom_bar()+
+# labs(title = "F/S Pathologist speciality by Diagnosis", x = "F/S Diagnosis", y = "Number of Cases")+
+#   scale_fill_igv()+
+#   theme_minimal()
+
+p2 = ggplot(subset(path_data), 
+       aes(same_diagnosis, fill = FS_Speciality)) +
+  geom_histogram(colour = "black", binwidth = 1, position = "dodge",  stat = "count") +
+  labs(title = "F/S Pathologist speciality by Diagnosis", x = "F/S Diagnosis", y = "Number of Cases")+
+  theme_bw()+ scale_fill_igv()+
+  theme_minimal()
+p2
+
+```
+```{r}
+
+
+# tissue_type_plot<- ggplot(path_data, aes(same_diagnosis, fill = tissue_type)) + geom_bar()+
+# labs(title = "Tissue type by Diagnosis", x = "F/S Diagnosis", y = "Number of Cases") +
+#    theme( panel.grid.minor = element_blank(),
+#         panel.background = element_blank(), axis.line = element_line(colour = "black")) 
+
+tissue_type_plot <- ggplot(subset(path_data), 
+       aes(same_diagnosis, fill = tissue_type)) +
+  geom_histogram(colour = "black", binwidth = 1, position = "dodge",  stat = "count") +
+  labs(title = "Tissue type by Diagnosis", x = "F/S Diagnosis", y = "Number of Cases")+
+  theme_bw()+ scale_fill_igv()+
+  theme_minimal()
+
+
+```
+```{r reviewing time sample}
+means_Review_time <- aggregate( Review_time ~ same_diagnosis, path_data, mean)
+
+t.test(Review_time~same_diagnosis, path_data)
+
+review_sample_plot <- ggplot(path_data,
+                             aes(same_diagnosis,Review_time, group = path_data$same_diagnosis)) +
+  geom_boxplot(fill = "light blue")+
+  scale_y_continuous("Time taken to review sample (min)", breaks= seq(0,3000, by=50), limits = c(0, 120))+
+  labs(title = "Time taken to review sample by F/S diagnosis", x = "F/S Diagnosis",
+       color = "Discrepent or Correct" ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  geom_jitter(shape = 3, width = 0.2) +
+  stat_summary(fun.y=mean, colour="darkred", geom="point", 
+               shape=18, size=2,show_guide = FALSE)
+
+review_sample_plot
+```
+```{r volume sample}
+means <- aggregate(volume ~ same_diagnosis, path_data, mean)
+
+t.test(volume~same_diagnosis, path_data)
+
+volume_plot <- ggplot(path_data,
+                             aes(same_diagnosis, volume, group = path_data$same_diagnosis)) +
+  geom_boxplot(fill = "light blue") +
+  scale_y_continuous("Volume of tissue sent for review (cm3)", breaks= seq(0,3000, by=50), limits = c(0, 120)) +
+  labs(title = "A", x = "F/S Diagnosis",
+       color = "Discrepent or Correct" ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  geom_jitter(shape = 3, width = 0.2) +
+  stat_summary(fun.y=mean, colour="darkred", geom="point", 
+               shape=18, size=2,show_guide = FALSE)
+#                 + 
+#   geom_text(data = means, aes(means$volume + 0.08, labels = means$volume))
+#   
+# boxplot(volume ~ same_diagnosis, path_data, ylim=c(0, 1000))
+# points(1:2, means$volume, col = "red")
+# text(1:2, means$volume + 0.08, labels = means$volume)
+
+
+volume_plot
+```
+
+```{r reviewing sample}
+review_sample_plot <- ggplot(path_data,
+                             aes(same_diagnosis,Review_time, group = path_data$same_diagnosis)) +
+  geom_boxplot(fill = "light blue")+
+  scale_y_continuous("Time taken to review sample (min)", breaks= seq(0,3000, by=50), limits = c(0, 120))+
+  labs(title = "B", x = "F/S Diagnosis",
+       color = "Discrepent or Correct" ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+geom_jitter(shape = 3, width = 0.2)
+review_sample_plot 
+
+```
+```{r age compared}
+age_compared_plot <- ggplot(path_data,
+                             aes(same_diagnosis,Age, group = path_data$same_diagnosis)) +
+  geom_boxplot(fill = "light blue")+
+  scale_y_continuous("Age of Patients (years)", breaks= seq(0,3000, by=50), limits = c(0, 120))+
+  labs(title = "C", x = "F/S Diagnosis",
+       color = "Discrepent or Correct" ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  stat_summary(fun.y=mean, colour="darkred", geom="point", 
+               shape=18, size=2,show_guide = FALSE) +
+  geom_jitter(shape = 3, width = 0.2)
+
+age_compared_plot
+
+```
+
+```{r boxplot array}
+
+grid.arrange(volume_plot, review_sample_plot, age_compared_plot, nrow = 1, layout_matrix = rbind(c(1, 2, 3 )))
+
+```
+```{r}
+library(corrgram)
+
+corrgram(path_data, order=NULL, panel=panel.shade, text.panel=panel.txt,
+           main="Correlogram") 
+
+
+```
+
+```{r}
+plot(round(prop.table(table(path_data$same_diagnosis)),2))
+
+#Variables are removed since they are shown to be statistically insignificant
+#A new machine learning data frame will be made to show the most statically significant variables
+
+ML_data <- path_data[,c(6:20, 23)]
+
+    train_size <- floor(0.75 * nrow(ML_data))
+set.seed(543)
+train_pos <- sample(seq_len(nrow(ML_data)), size = train_size)
+
+train_classification <- ML_data[train_pos, ]
+test_classification <- ML_data[-train_pos, ]
+
+dim(train_classification)
+dim(test_classification)
+
+summary(train_classification)
+
+```
+
+```{r}
+library(Boruta) 
+
+set.seed(1407)
+randomForest::importance
+boruta_analysis = Boruta(same_diagnosis ~ ., data=ML_data, maxRuns=500)
+library(mlbench)
+plot(boruta_analysis)
+as.data.frame(boruta_analysis$finalDecision)
+
+
+```
+#PCA
+```{r}
+
+path_data_pca <- prcomp(path_data_numeric[,-c(1,10)],center= TRUE, scale. = TRUE)
+
+summary(path_data_pca)
+
+str(path_data_pca)
+```
+```{r}
+library(devtools)
+
+library(ggbiplot)
+
+#diagnosis_groups <- cut(path_data$same_diagnosis) 
+
+ggbiplot(path_data_pca, obs.scale = 1, groups=path_data$same_diagnosis)
+
+```
+```{r}
+
+#PCA by age
+
+age_groups <- cut(path_data$Age, breaks = c(-Inf, 25, 45, 66, Inf), labels = c("Under 25 years", "25-44 years", "45-65 years", "Older than 65"), right = FALSE)
+
+ggbiplot(path_data_pca, ellipse=TRUE, obs.scale = 1, groups=age_groups) + ggtitle("PCA of continous variables grouped by age")
+#obs.scale = 1, var.scale = 10,
+
+ggbiplot(path_data_pca, ellipse=TRUE, groups=age_groups, choices = c(3,4)) + ggtitle("3rd and 4th PCA of continous variables grouped by age")
+```
+```{r}
+#PCA by operation complexity
+
+complexity <- cut(path_data$operation_complexity, breaks = c(-Inf, 5, 10, 15, Inf), labels = c("Not extensive", "Average", "Extensive", "Very Extensive"), right = FALSE)
+
+ggbiplot(path_data_pca, ellipse=TRUE, obs.scale = 1,  groups=complexity) + ggtitle("PCA of continous variables grouped by complexity of operation ")
+
+
+ggbiplot(path_data_pca, ellipse=TRUE, groups=complexity, choices = c(3,4)) + ggtitle("PCA of continous variables in CV data using the 3rd and 4th component")
+
+```
+```{r}
+#MCA for catagorical variables
+library("FactoMineR")
+library("factoextra")
+
+path_catagorical <- path_data[,c(8:14,16,17,19,23)]
+
+path_catagorical$operation_complexity <- as.factor(path_catagorical$operation_complexity)
+
+head(path_catagorical)
+
+for (i in 1:8) {
+  plot(path_catagorical[,i], main=colnames(path_catagorical)[i],
+       ylab = "Count", col="steelblue", las = 2)
+}
+
+res.mca <- MCA(path_catagorical, graph = FALSE)
+print(res.mca)
+
+eig.val <- get_eigenvalue(res.mca)
+fviz_screeplot(res.mca, addlabels = TRUE, ylim = c(0, 45))
+
+var <- get_mca_var(res.mca)
+var
+```
+#Feature selection
+##Recursively Filtered data
+```{r recurisve filtering}
+#set.seed(134)
+
+#winequality_recursive <- path_data
+#levels(winequality_recursive$same_diagnosis)[1] <- "1"
+#levels(winequality_recursive$same_diagnosis)[2] <- "2"
+
+#svmProfile <- rfe(winequality_recursive[,1:ncol(winequality_recursive)-1],
+                 #winequality_recursive$same_diagnosis,
+               #   sizes = c(2, 4, 5, 9),
+              #    rfeControl = rfeControl(functions = caretFuncs,number = 2),
+             #     method = "svmRadial")
+
+#svmProfile
+#svmProfile$variables
+```
+```{r}
+#str(winequality_recursive)
+```
+##Train data GlM
+```{r}
+library("e1071")
+ctrl <- trainControl(method = "repeatedcv", repeats = 20, classProbs = T, savePredictions = T)
+
+levels(train_classification$same_diagnosis) <- make.names(levels(factor(train_classification$same_diagnosis)))
+
+suppressWarnings(path_data_logreg_train <- train(same_diagnosis~., data=train_classification[,-1], method = "glm", family= "binomial", trControl = ctrl))
+
+summary(path_data_logreg_train)
+```
+```{r}
+path_data_logreg_train
+```
+```{r}
+plot(x = roc(predictor = path_data_logreg_train$pred$Misdiagnosed, response = path_data_logreg_train$pred$obs)$specificities, y = roc(predictor = path_data_logreg_train$pred$Misdiagnosed, response = path_data_logreg_train$pred$obs)$sensitivities, col= "blue", xlim = c(1, 0), type ="l", ylab = "Sensitivity", xlab = "Specificity")
+
+legend("bottomright", legend = paste("Misdiagnosed vs. Correctly diagnosed F/S | ", roc(predictor = path_data_logreg_train$pred$Correct.diagnosis, response = path_data_logreg_train$pred$obs)$auc, sep = ""), col = c("blue"), fill = c("blue"))
+
+```
+```{r}
+#then predict with logistic regression
+path_data_predict_class <- predict(path_data_logreg_train, newdata = test_classification)
+
+#confusion matrix
+confusionMatrix(path_data_predict_class, reference = test_classification$same_diagnosis)
+```
+
+Naive bayes
+```{r}
+#path_data_numeric[,-c(10,11)] <- NULL
+
+#path_data_numeric <- rbind(path_data_numeric,path_data[,22])
+
+train_size_numeric <- floor(0.75 * nrow(path_data_numeric))
+set.seed(543)
+train_pos_numeric <- sample(seq_len(nrow(path_data_numeric)), size = train_size)
+
+train_classification_numeric <- path_data_numeric[train_pos, ]
+test_classification_numeric <- path_data_numeric[-train_pos, ]
+
+dim(train_classification_numeric)
+dim(test_classification_numeric)
+
+summary(train_classification_numeric)
+
+levels(train_classification_numeric$same_diagnosis) <- make.names(levels(factor(train_classification_numeric$same_diagnosis)))
+
+library(naivebayes)
+ctrl_bayes <- trainControl(method ="repeatedcv", repeats = 15, classProbs = T, savePredictions = T)
+
+cv_naive_bayes <- train(same_diagnosis~ ., data = train_classification_numeric, trControl = ctrl_bayes, method = 'naive_bayes', na.action=na.exclude)
+```
+```{r}
+
+ 
+
+cv_naive_bayes
+```
+Naive Bayes ROC curve
+```{r}
+roc_data <- roc(predictor = cv_naive_bayes$pred$Correct.diagnosis, response = cv_naive_bayes$pred$obs, levels = c("Misdiagnosed", "Correct diagnosis"))$auc
+
+plot(x = roc(predictor = cv_naive_bayes$pred$No.cancer, response = cv_naive_bayes$pred$obs, levels= c("Misdiagnosed", "Correct diagnosis"))$specificities, y = roc(predictor = cv_naive_bayes$pred$No.cancer, response = cv_naive_bayes$pred$obs, levels= c("Misdiagnosed", "Correct diagnosis"))$sensitivities, col= "blue", xlim = c(1, 0), type ="l", ylab = "Sensitivity", xlab = "Specificity")
+
+legend("bottomright", legend = c(paste("Misdiagnosed v Correctly diagnosed --", roc_data, sep = "")), fill =c("blue","red"),  col = c("blue","red"))
+
+```
+Prediction and confusion matrix
+```{r}
+naive_bayes_pred <- predict(cv_naive_bayes, newdata = test_classification[-7])
+confusionMatrix (cv_naive_bayes, reference = test_classification$same_diagnosis)
+```
+##Trees
+```{r}
+library(randomForest)
+library(tree)
+library(caret)
+library(pROC)
+library(gbm)
+library(ROCR)
+
+set.seed(543)
+regression_tree <- tree(same_diagnosis ~ ., data = train_classification_numeric)
+
+plot(regression_tree)
+text(regression_tree, cex=0.75)
+
+library(party)
+irisct <- ctree(same_diagnosis ~ ., data = path_data_numeric)
+plot(irisct)
+
+```
+```{r}
+
+summary(regression_tree)
+```
+
+
+Test this tree on the test set
+```{r}
+classification_test <- predict(regression_tree, newdata = test_classification_numeric, type = "class")
+
+confusionMatrix(classification_test, reference = test_classification_numeric$same_diagnosis)
+```
+
+Fit the tree using cross validation. Use FUN = prune.misclass to indicate we want to classification error to guide cross val and pruning. 
+```{r}
+fit_classification_tree <- cv.tree(classification_test,FUN=prune.misclass, K = 13)
+
+fit_classification_tree
+```
+Shows trees with 19 or 1 nodes do the best
+
+Now prune the tree 
+```{r}
+prune_classification_tree=prune.misclass(regression_tree, best=11)
+
+plot(prune_classification_tree)
+text(prune_classification_tree,cex=0.45)
+```
+
+Test the pruned tree on the test set
+```{r}
+classification_test_pruned <- predict(prune_classification_tree, newdata = test_classification, type = "class")
+
+confusionMatrix(classification_test_pruned, reference = test_classification$same_diagnosis)
+```
+#Random Forest
+
+```{r}
+na.omit(train_classification)
+
+isError <- is.na(train_classification) 
+
+
+RF_classification <- randomForest(same_diagnosis~., data= train_classification_numeric,  importance = TRUE, oob.times = 15, confusion = TRUE)
+
+RF_classification
+
+predictions_RF <- predict(RF_classification, newdata = test_classification_numeric)
+
+confusionMatrix(predictions_RF, reference = test_classification_numeric$same_diagnosis)
+```
+
+#Support Vector Machine
+
+Train linear SVM
+```{r}
+set.seed(30495)
+ctrl <- trainControl(method = "repeatedcv", repeats = 5,classProbs = T, savePredictions = T)
+svm <- train(same_diagnosis~ ., data = train_classification, method = "svmLinear", tuneLength = 10, trControl = ctrl)
+
+svm
+```
+
+```{r}
+roc(predictor = svm$pred$Misdiagnosed, response = svm$pred$obs)$auc
+```
+
+Visualize ROC curve for SVM
+```{r}
+plot(x = roc(predictor = svm$pred$Misdiagnosed, response = svm$pred$obs)$specificities, y = roc(predictor = svm$pred$Misdiagnosed, response = svm$pred$obs)$sensitivities, col= "blue", xlim = c(1, 0), type ="l", ylab = "Sensitivity", xlab = "Specificity")
+
+legend("bottomright", legend = paste("Misdiagnosed vs. correctly diagnosed F/S | ", roc(predictor = svm$pred$Misdiagnosed, response = svm$pred$obs)$auc, sep = ""), col = c("blue"), fill = c("blue"))
+```
+lasso regression
+```{r}
+CARET.TRAIN.CTRL <- trainControl(method="repeatedcv",
+                                 number=5,
+                                 repeats=5,
+                                 verboseIter=FALSE)
+
+# test out Ridge regression model
+
+lambdas <- seq(1,0,-0.001)
+
+Y <- path_data$same_diagnosis 
+
+
+path_data_numeric$same_diagnosis <- NULL
+# train model
+set.seed(123)  # for reproducibility
+model_ridge <- cv.glmnet(x=as.matrix(path_data_numeric),y=Y,alpha=1,family="binomial")
+
+model_ridge$lambda.1se
+plot(model_ridge)
+
+```
+
+
+```{r}
+#summary(path_data_logreg)$coef
+
+```
+
+```{r}
+path_data_probability <- predict(path_data_logreg_train, type="response")
+
+
+
+Log_regression_predictions <- rep("No screening needed",668)
+Log_regression_predictions [path_data_probability >.5] <-  "Should have screened"
+
+table(Log_regression_predictions, path_data$same_diagnosis)
+
+```
+```
+
+```{r}
